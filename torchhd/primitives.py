@@ -1,8 +1,20 @@
 from typing import Literal, Callable, overload
 import torch
-from torch import Tensor, BoolTensor
+from torch import Tensor, FloatTensor
 
-__all__ = ["mul", "prod", "add", "sum", "bind", "multibind", "bundle", "multibundle"]
+__all__ = [
+    "mul",
+    "bmul",
+    "add",
+    "badd",
+    "randsel",
+    "brandsel",
+    "shift",
+    "bind",
+    "multibind",
+    "bundle",
+    "multibundle",
+]
 
 
 def mul(input: Tensor, other: Tensor) -> Tensor:
@@ -45,8 +57,15 @@ def mul(input: Tensor, other: Tensor) -> Tensor:
 
     return torch.mul(input, other)
 
+def biggest_power_two(n):
+    # if n is a power of two simply return it
+    if not (n & (n - 1)):
+        return n
 
-def prod(input: Tensor) -> Tensor:
+    # else set only the most significant bit
+    return  int("1" + (len(bin(n)) - 3) * "0", 2)
+
+def bmul(input: Tensor) -> Tensor:
     r"""Binding of multiple hypervectors.
 
     Binds all the input hypervectors together.
@@ -78,24 +97,34 @@ def prod(input: Tensor) -> Tensor:
 
     """
     dtype = input.dtype
-    dim = -2
 
     if dtype == torch.uint8:
         raise ValueError("Unsigned integer hypervectors are not supported.")
 
     if dtype == torch.bool:
-        hvs = torch.unbind(input, dim)
-        result = hvs[0]
+        n = input.size(-2)
+        n_ = biggest_power_two(n)
+        output = input[...,:n_,:]
 
-        for i in range(1, len(hvs)):
-            result = torch.logical_xor(result, hvs[i])
+        # parallelize many XORs in a hierarchical manner
+        # for larger batches this is significantly faster
+        while output.size(-2) > 1:
+            output = torch.logical_xor(output[...,0::2,:], output[...,1::2,:])
 
-        return result
+        output = output.squeeze(-2)
 
-    return torch.prod(input, dim=dim, dtype=dtype)
+        # TODO: as an optimization we could also perform the hierarchical XOR
+        # on the leftovers in a recursive fashion
+        leftovers = torch.unbind(input[...,n_:,:], -2)
+        for i in range(n - n_):
+            output = torch.logical_xor(output, leftovers[i])
+
+        return output
+
+    return torch.prod(input, dim=-2, dtype=dtype)
 
 
-def add(input: Tensor, other: Tensor, *, tie: BoolTensor = None) -> Tensor:
+def add(input: Tensor, other: Tensor, *, generator: torch.Generator = None) -> Tensor:
     r"""Bundles two hypervectors which produces a hypervector maximally similar to both.
 
     The bundling operation is used to aggregate information into a single hypervector.
@@ -132,15 +161,14 @@ def add(input: Tensor, other: Tensor, *, tie: BoolTensor = None) -> Tensor:
         raise ValueError("Unsigned integer hypervectors are not supported.")
 
     if dtype == torch.bool:
-        if tie is not None:
-            return torch.where(input == other, input, tie)
-        else:
-            return torch.logical_and(input, other)
+        tiebreaker = torch.empty_like(input)
+        tiebreaker.bernoulli_(0.5, generator=generator)
+        return input.where(input == other, tiebreaker)
 
     return torch.add(input, other)
 
 
-def sum(input: Tensor) -> Tensor:
+def badd(input: Tensor) -> Tensor:
     r"""Multiset of input hypervectors.
 
     Bundles all the input hypervectors together.
@@ -183,7 +211,29 @@ def sum(input: Tensor) -> Tensor:
     return torch.sum(input, dim=dim, dtype=dtype)
 
 
-def shift(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
+def randsel(
+    input: Tensor, other: Tensor, *, p: float = 0.5, generator: torch.Generator = None
+) -> Tensor:
+    select = torch.empty_like(input, dtype=torch.bool)
+    select.bernoulli_(p, generator=generator)
+    return input.where(select, other)
+
+
+def brandsel(
+    input: Tensor, *, p: FloatTensor = None, generator: torch.Generator = None
+) -> Tensor:
+    d = input.size(-1)
+    device = input.device
+
+    if p is None:
+        p = torch.ones(input.shape[:-1], dtype=torch.float, device=device)
+
+    select = torch.multinomial(p, d, replacement=True, generator=generator)
+    select.unsqueeze_(-2)
+    return input.gather(-2, select).squeeze(-2)
+
+
+def shift(input: Tensor, *, n=1) -> Tensor:
     r"""Permutes hypervector by specified number of shifts.
 
     The permutation operator is used to assign an order to hypervectors.
@@ -196,12 +246,11 @@ def shift(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
 
     Args:
         input (Tensor): input hypervector
-        shifts (int or tuple of ints, optional): The number of places by which the elements of the tensor are shifted. If shifts is a tuple, dims must be a tuple of the same size, and each dimension will be rolled by the corresponding value.
-        dims (int or tuple of ints, optional): axis along which to permute the hypervector. Default: ``-1``.
+        n (int or tuple of ints, optional): The number of places by which the elements of the tensor are shifted. If shifts is a tuple, dims must be a tuple of the same size, and each dimension will be rolled by the corresponding value.
 
     Shapes:
-        - Input: :math:`(*)`
-        - Output: :math:`(*)`
+        - Input: :math:`(*, d)`
+        - Output: :math:`(*, d)`
 
     Examples::
 
@@ -212,18 +261,13 @@ def shift(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
         tensor([ -1.,  1.,  -1.])
 
     """
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    return torch.roll(input, shifts=shifts, dims=dims)
+    return torch.roll(input, shifts=n, dims=-1)
 
 
 _bind = mul
-_multibind = prod
+_multibind = bmul
 _bundle = add
-_multibundle = sum
+_multibundle = badd
 _permute = shift
 
 
@@ -274,7 +318,7 @@ def set_bind_method(name_or_single: str, multi=None):
 
         if name == "multiply":
             _bind = mul
-            _multibind = prod
+            _multibind = bmul
 
     # handle case when a custom function is provided
     elif callable(name_or_single):
@@ -297,7 +341,7 @@ def set_bind_method(name_or_single: str, multi=None):
 
 
 @overload
-def set_bundle_method(name: Literal["add"]):
+def set_bundle_method(name: Literal["add", "randsel"]):
     ...
 
 
@@ -315,7 +359,7 @@ def set_bundle_method(name_or_single: str, multi=None):
     # handle case when a build-in name is provided
     if isinstance(name_or_single, str):
         name = name_or_single
-        supported = {"add"}
+        supported = {"add", "randsel"}
         if name not in supported:
             raise ValueError(
                 f"bundle method {name} is not supported, use one of: {supported}"
@@ -323,7 +367,11 @@ def set_bundle_method(name_or_single: str, multi=None):
 
         if name == "add":
             _bundle = add
-            _multibundle = sum
+            _multibundle = badd
+
+        if name == "randsel":
+            _bundle = randsel
+            _multibundle = brandsel
 
     # handle case when a custom function is provided
     elif callable(name_or_single):
