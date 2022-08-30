@@ -4,7 +4,7 @@ from torch import BoolTensor, LongTensor, Tensor
 import torch.nn.functional as F
 from collections import deque
 
-from torchhd.primitives import bind, multibind, bundle, multibundle, permute
+from torchhd.primitives import bind, multibind, release, bundle, multibundle, permute
 
 
 __all__ = [
@@ -12,15 +12,11 @@ __all__ = [
     "random_hv",
     "level_hv",
     "circular_hv",
-    "bind",
-    "unbind",
-    "bundle",
-    "permute",
     "cleanup",
     "hard_quantize",
     "soft_quantize",
-    "hamming_similarity",
-    "cosine_similarity",
+    "ham_similarity",
+    "cos_similarity",
     "dot_similarity",
     "multiset",
     "multibundle",
@@ -446,7 +442,7 @@ def circular_hv(
 
             temp_hv = torch.where(threshold_v[span_idx] < t, span_start_hv, span_end_hv)
 
-        mutation_history.append(unbind(temp_hv, mutation_hv))
+        mutation_history.append(release(temp_hv, mutation_hv))
         mutation_hv = temp_hv
 
         if i % 2 == 0:
@@ -454,61 +450,13 @@ def circular_hv(
 
     for i in range(num_embeddings + 1, num_embeddings * 2 - 1):
         mut = mutation_history.popleft()
-        mutation_hv = unbind(mutation_hv, mut)
+        mutation_hv = release(mutation_hv, mut)
 
         if i % 2 == 0:
             hv[i // 2] = mutation_hv
 
     hv.requires_grad = requires_grad
     return hv
-
-
-
-def unbind(input: Tensor, other: Tensor) -> Tensor:
-    r"""Inverse of the binding operation.
-
-    See :func:`~torchhd.functional.bind`.
-
-    Aliased as ``torchhd.unbind``.
-
-    Args:
-        input (Tensor): input hypervector
-        other (Tensor): other input hypervector
-
-    Shapes:
-        - Input: :math:`(*)`
-        - Other: :math:`(*)`
-        - Output: :math:`(*)`
-
-    Examples::
-
-        >>> x = functional.random_hv(2, 6)
-        >>> x
-        tensor([[-1.,  1.,  1., -1., -1.,  1.],
-                [-1., -1.,  1.,  1.,  1., -1.]])
-        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
-        tensor([-1.,  1.,  1., -1., -1.,  1.])
-
-        >>> x = functional.random_hv(2, 6, dtype=torch.complex64)
-        >>> x
-        tensor([[-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j],
-                [ 0.1429+0.9897j, -0.9173+0.3983j, -0.4906+0.8714j,  0.4710-0.8821j, 0.6478+0.7618j,  0.8753+0.4836j]])
-        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
-        tensor([-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j])
-
-    """
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        return torch.logical_xor(input, other)
-
-    if torch.is_complex(input):
-        return torch.mul(input, other.conj())
-
-    return torch.mul(input, other)
 
 
 def soft_quantize(input: Tensor):
@@ -617,7 +565,7 @@ def dot_similarity(input: Tensor, others: Tensor) -> Tensor:
     return F.linear(input, others)
 
 
-def cosine_similarity(input: Tensor, others: Tensor, *, eps=1e-08) -> Tensor:
+def cos_similarity(input: Tensor, others: Tensor, *, eps=1e-08) -> Tensor:
     """Cosine similarity between the input vector and each vector in others.
 
     Aliased as ``torchhd.cosine_similarity``.
@@ -694,10 +642,11 @@ def cosine_similarity(input: Tensor, others: Tensor, *, eps=1e-08) -> Tensor:
     else:
         magnitude = input_mag * others_mag
 
-    return dot_similarity(input, others).to(out_dtype) / (magnitude + eps)
+    magnitude = magnitude.clamp(min=eps)
+    return dot_similarity(input, others).to(out_dtype) / magnitude
 
 
-def hamming_similarity(input: Tensor, others: Tensor) -> LongTensor:
+def ham_similarity(input: Tensor, others: Tensor) -> LongTensor:
     """Number of equal elements between the input vectors and each vector in others.
 
     Args:

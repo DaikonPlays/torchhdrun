@@ -6,6 +6,13 @@ import torchhd.datasets as datasets
 import torchhd.utils as utils
 
 from torchhd.primitives import (
+    add,
+    badd,
+    mul,
+    bmul,
+    randsel,
+    brandsel,
+    shift,
     bind,
     multibind,
     set_bind_method,
@@ -21,14 +28,21 @@ from torchhd.functional import (
     level_hv,
     circular_hv,
     unbind,
-    cosine_similarity,
+    cos_similarity,
     dot_similarity,
+    ham_similarity
 )
 
 from torchhd.version import __version__
 
 __all__ = [
-    "primitives",
+    "add",
+    "badd",
+    "mul",
+    "bmul",
+    "randsel",
+    "brandsel",
+    "shift",
     "functional",
     "embeddings",
     "structures",
@@ -47,6 +61,7 @@ __all__ = [
     "set_bundle_method",
     "permute",
     "set_permute_method",
-    "cosine_similarity",
+    "cos_similarity",
     "dot_similarity",
+    "ham_similarity",
 ]

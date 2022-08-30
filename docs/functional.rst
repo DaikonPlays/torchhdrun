@@ -7,47 +7,6 @@ torchhd.functional
 
 This module consists of the basic hypervector generation functions and operations used on hypervectors.
 
-Basis-hypervector sets
-----------------------------------
-
-.. autosummary:: 
-    :toctree: generated/
-    :template: function.rst
-
-    identity_hv
-    random_hv
-    level_hv
-    circular_hv
-    
-
-Operations
---------------------
-
-.. autosummary::
-    :toctree: generated/
-    :template: function.rst
-
-    bind
-    unbind
-    bundle
-    permute
-    cleanup
-    soft_quantize
-    hard_quantize
-
-
-Similarities
-------------------------
-
-.. autosummary::
-    :toctree: generated/
-    :template: function.rst
-
-    
-    cosine_similarity
-    dot_similarity
-    hamming_similarity
-
 
 Encodings
 ------------------------
@@ -57,7 +16,6 @@ Encodings
     :template: function.rst
 
     multiset
-    multibind
     bundle_sequence
     bind_sequence
     hash_table

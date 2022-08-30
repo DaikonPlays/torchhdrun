@@ -12,8 +12,10 @@ __all__ = [
     "shift",
     "bind",
     "multibind",
+    "release",
     "bundle",
     "multibundle",
+    "scratch",
 ]
 
 
@@ -57,13 +59,16 @@ def mul(input: Tensor, other: Tensor) -> Tensor:
 
     return torch.mul(input, other)
 
+
 def biggest_power_two(n):
+    """Returns the biggest power of two <= n"""
     # if n is a power of two simply return it
     if not (n & (n - 1)):
         return n
 
     # else set only the most significant bit
-    return  int("1" + (len(bin(n)) - 3) * "0", 2)
+    return int("1" + (len(bin(n)) - 3) * "0", 2)
+
 
 def bmul(input: Tensor) -> Tensor:
     r"""Binding of multiple hypervectors.
@@ -104,18 +109,18 @@ def bmul(input: Tensor) -> Tensor:
     if dtype == torch.bool:
         n = input.size(-2)
         n_ = biggest_power_two(n)
-        output = input[...,:n_,:]
+        output = input[..., :n_, :]
 
         # parallelize many XORs in a hierarchical manner
         # for larger batches this is significantly faster
         while output.size(-2) > 1:
-            output = torch.logical_xor(output[...,0::2,:], output[...,1::2,:])
+            output = torch.logical_xor(output[..., 0::2, :], output[..., 1::2, :])
 
         output = output.squeeze(-2)
 
         # TODO: as an optimization we could also perform the hierarchical XOR
         # on the leftovers in a recursive fashion
-        leftovers = torch.unbind(input[...,n_:,:], -2)
+        leftovers = torch.unbind(input[..., n_:, :], -2)
         for i in range(n - n_):
             output = torch.logical_xor(output, leftovers[i])
 
@@ -211,6 +216,50 @@ def badd(input: Tensor) -> Tensor:
     return torch.sum(input, dim=dim, dtype=dtype)
 
 
+def sub(input: Tensor, other: Tensor, *, generator: torch.Generator = None) -> Tensor:
+    r"""Bundles two hypervectors which produces a hypervector maximally similar to both.
+
+    The bundling operation is used to aggregate information into a single hypervector.
+
+    .. math::
+
+        \oplus: \mathcal{H} \times \mathcal{H} \to \mathcal{H}
+
+    Aliased as ``torchhd.bundle``.
+
+    Args:
+        input (Tensor): input hypervector
+        other (Tensor): other input hypervector
+        tie (BoolTensor, optional): specifies how to break a tie while bundling boolean hypervectors. Default: only set bit if both ``input`` and ``other`` are ``True``.
+
+    Shapes:
+        - Input: :math:`(*)`
+        - Other: :math:`(*)`
+        - Output: :math:`(*)`
+
+    Examples::
+
+        >>> x = functional.random_hv(2, 3)
+        >>> x
+        tensor([[ 1.,  1.,  1.],
+                [-1.,  1., -1.]])
+        >>> functional.bundle(x[0], x[1])
+        tensor([0., 2., 0.])
+
+    """
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        tiebreaker = torch.empty_like(input)
+        tiebreaker.bernoulli_(0.5, generator=generator)
+        return input.where(input == other, tiebreaker)
+
+    return torch.sub(input, other)
+
+
 def randsel(
     input: Tensor, other: Tensor, *, p: float = 0.5, generator: torch.Generator = None
 ) -> Tensor:
@@ -279,12 +328,23 @@ def multibind(input: Tensor) -> Tensor:
     return _multibind(input)
 
 
+def release(input: Tensor, other: Tensor) -> Tensor:
+    if torch.is_complex(other):
+        other = other.conj()
+
+    return bind(input, other)
+
+
 def bundle(input: Tensor, other: Tensor) -> Tensor:
     return _bundle(input, other)
 
 
 def multibundle(input: Tensor) -> Tensor:
     return _multibundle(input)
+
+
+def scratch(input: Tensor, other: Tensor) -> Tensor:
+    return sub(input, other)
 
 
 def permute(input: Tensor, n: int) -> Tensor:
