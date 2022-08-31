@@ -27,7 +27,6 @@ from torchhd.functional import (
     random_hv,
     level_hv,
     circular_hv,
-    unbind,
     cos_similarity,
     dot_similarity,
     ham_similarity
