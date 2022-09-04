@@ -1,6 +1,6 @@
 import math
 import torch
-from torch import BoolTensor, LongTensor, Tensor
+from torch import BoolTensor, LongTensor, FloatTensor, Tensor
 import torch.nn.functional as F
 from collections import deque
 
@@ -459,6 +459,176 @@ def circular_hv(
     return hv
 
 
+def bind(input: Tensor, other: Tensor) -> Tensor:
+    r"""Binds two hypervectors which produces a hypervector dissimilar to both.
+
+    Binding is used to associate information, for instance, to assign values to variables.
+
+    .. math::
+
+        \otimes: \mathcal{H} \times \mathcal{H} \to \mathcal{H}
+
+    Aliased as ``torchhd.bind``.
+
+    Args:
+        input (Tensor): input hypervector
+        other (Tensor): other input hypervector
+
+    Shapes:
+        - Input: :math:`(*)`
+        - Other: :math:`(*)`
+        - Output: :math:`(*)`
+
+    Examples::
+
+        >>> x = functional.random_hv(2, 3)
+        >>> x
+        tensor([[ 1., -1., -1.],
+                [ 1.,  1.,  1.]])
+        >>> functional.bind(x[0], x[1])
+        tensor([ 1., -1., -1.])
+
+    """
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        return torch.logical_xor(input, other)
+
+    return torch.mul(input, other)
+
+
+def unbind(input: Tensor, other: Tensor) -> Tensor:
+    r"""Inverse of the binding operation.
+
+    See :func:`~torchhd.functional.bind`.
+
+    Aliased as ``torchhd.unbind``.
+
+    Args:
+        input (Tensor): input hypervector
+        other (Tensor): other input hypervector
+
+    Shapes:
+        - Input: :math:`(*)`
+        - Other: :math:`(*)`
+        - Output: :math:`(*)`
+
+    Examples::
+
+        >>> x = functional.random_hv(2, 6)
+        >>> x
+        tensor([[-1.,  1.,  1., -1., -1.,  1.],
+                [-1., -1.,  1.,  1.,  1., -1.]])
+        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
+        tensor([-1.,  1.,  1., -1., -1.,  1.])
+
+        >>> x = functional.random_hv(2, 6, dtype=torch.complex64)
+        >>> x
+        tensor([[-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j],
+                [ 0.1429+0.9897j, -0.9173+0.3983j, -0.4906+0.8714j,  0.4710-0.8821j, 0.6478+0.7618j,  0.8753+0.4836j]])
+        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
+        tensor([-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j])
+
+    """
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        return torch.logical_xor(input, other)
+
+    if torch.is_complex(input):
+        return torch.mul(input, other.conj())
+
+    return torch.mul(input, other)
+
+
+def bundle(input: Tensor, other: Tensor, *, tie: BoolTensor = None) -> Tensor:
+    r"""Bundles two hypervectors which produces a hypervector maximally similar to both.
+
+    The bundling operation is used to aggregate information into a single hypervector.
+
+    .. math::
+
+        \oplus: \mathcal{H} \times \mathcal{H} \to \mathcal{H}
+
+    Aliased as ``torchhd.bundle``.
+
+    Args:
+        input (Tensor): input hypervector
+        other (Tensor): other input hypervector
+        tie (BoolTensor, optional): specifies how to break a tie while bundling boolean hypervectors. Default: only set bit if both ``input`` and ``other`` are ``True``.
+
+    Shapes:
+        - Input: :math:`(*)`
+        - Other: :math:`(*)`
+        - Output: :math:`(*)`
+
+    Examples::
+
+        >>> x = functional.random_hv(2, 3)
+        >>> x
+        tensor([[ 1.,  1.,  1.],
+                [-1.,  1., -1.]])
+        >>> functional.bundle(x[0], x[1])
+        tensor([0., 2., 0.])
+
+    """
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        if tie is not None:
+            return torch.where(input == other, input, tie)
+        else:
+            return torch.logical_and(input, other)
+
+    return torch.add(input, other)
+
+
+def permute(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
+    r"""Permutes hypervector by specified number of shifts.
+
+    The permutation operator is used to assign an order to hypervectors.
+
+    .. math::
+
+        \Pi: \mathcal{H} \to \mathcal{H}
+
+    Aliased as ``torchhd.permute``.
+
+    Args:
+        input (Tensor): input hypervector
+        shifts (int or tuple of ints, optional): The number of places by which the elements of the tensor are shifted. If shifts is a tuple, dims must be a tuple of the same size, and each dimension will be rolled by the corresponding value.
+        dims (int or tuple of ints, optional): axis along which to permute the hypervector. Default: ``-1``.
+
+    Shapes:
+        - Input: :math:`(*)`
+        - Output: :math:`(*)`
+
+    Examples::
+
+        >>> x = functional.random_hv(1, 3)
+        >>> x
+        tensor([ 1.,  -1.,  -1.])
+        >>> functional.permute(x)
+        tensor([ -1.,  1.,  -1.])
+
+    """
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    return torch.roll(input, shifts=shifts, dims=dims)
+
+
 def soft_quantize(input: Tensor):
     """Applies the hyperbolic tanh function to all elements of the input tensor.
 
@@ -679,8 +849,99 @@ def ham_similarity(input: Tensor, others: Tensor) -> LongTensor:
     return torch.sum(input == others, dim=-1, dtype=torch.long)
 
 
-# alias
-multiset = multibundle
+def multiset(input: Tensor) -> Tensor:
+    r"""Multiset of input hypervectors.
+
+    Bundles all the input hypervectors together.
+
+    Aliased as ``torchhd.functional.multibundle``.
+
+    .. math::
+
+        \bigoplus_{i=0}^{n-1} V_i
+
+    Args:
+        input (Tensor): input hypervector tensor
+
+    Shapes:
+        - Input: :math:`(*, n, d)`
+        - Output: :math:`(*, d)`
+
+    Examples::
+
+        >>> x = functional.random_hv(3, 3)
+        >>> x
+        tensor([[ 1.,  1.,  1.],
+                [-1.,  1.,  1.],
+                [-1.,  1., -1.]])
+        >>> functional.multiset(x)
+        tensor([-1.,  3.,  1.])
+
+    """
+    dim = -2
+    dtype = input.dtype
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        count = torch.sum(input, dim=dim, dtype=torch.long)
+        threshold = input.size(dim) // 2
+        return torch.greater(count, threshold)
+
+    return torch.sum(input, dim=dim, dtype=dtype)
+
+
+multibundle = multiset
+
+
+def multibind(input: Tensor) -> Tensor:
+    r"""Binding of multiple hypervectors.
+
+    Binds all the input hypervectors together.
+
+    .. math::
+
+        \bigotimes_{i=0}^{n-1} V_i
+
+    Args:
+        input (Tensor): input hypervector tensor.
+
+    Shapes:
+        - Input: :math:`(*, n, d)`
+        - Output: :math:`(*, d)`
+
+    .. note::
+
+        This method is not supported for ``torch.float16`` and ``torch.bfloat16`` input data types on a CPU device.
+
+    Examples::
+
+        >>> x = functional.random_hv(3, 3)
+        >>> x
+        tensor([[ 1.,  1.,  1.],
+                [-1.,  1.,  1.],
+                [-1.,  1., -1.]])
+        >>> functional.multibind(x)
+        tensor([ 1.,  1., -1.])
+
+    """
+    dtype = input.dtype
+    dim = -2
+
+    if dtype == torch.uint8:
+        raise ValueError("Unsigned integer hypervectors are not supported.")
+
+    if dtype == torch.bool:
+        hvs = torch.unbind(input, dim)
+        result = hvs[0]
+
+        for i in range(1, len(hvs)):
+            result = torch.logical_xor(result, hvs[i])
+
+        return result
+
+    return torch.prod(input, dim=dim, dtype=dtype)
 
 
 def cross_product(input: Tensor, other: Tensor) -> Tensor:

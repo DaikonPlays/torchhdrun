@@ -27,6 +27,10 @@ from torchhd.functional import (
     random_hv,
     level_hv,
     circular_hv,
+    bind,
+    unbind,
+    bundle,
+    permute,
     cos_similarity,
     dot_similarity,
     ham_similarity
@@ -59,8 +63,7 @@ __all__ = [
     "multibundle",
     "set_bundle_method",
     "permute",
-    "set_permute_method",
-    "cos_similarity",
+    "cosine_similarity",
     "dot_similarity",
     "ham_similarity",
 ]
