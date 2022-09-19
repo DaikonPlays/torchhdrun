@@ -1,9 +1,16 @@
+import torchhd.architecture as architecture
 import torchhd.primitives as primitives
 import torchhd.functional as functional
 import torchhd.embeddings as embeddings
 import torchhd.structures as structures
 import torchhd.datasets as datasets
 import torchhd.utils as utils
+
+from torchhd.architecture import (
+    HyperTensor,
+    MAPTensor,
+    BSCTensor,
+)
 
 from torchhd.primitives import (
     add,

@@ -1,82 +1,6 @@
+from typing import List
 import torch
 from torch import Tensor
-
-class ArchModel:
-    def bundle(self, input: Tensor, other: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    def multibundle(self, input: Tensor) -> Tensor:
-        n = input.size(-2)
-
-        if n == 1:
-            return input.clone()
-
-        hvs = torch.unbind(input, dim=-2)
-
-        output = self.bundle(hvs[0], hvs[1])
-        for i in range(2, n):
-            output = self.bundle(output, hvs[i])
-
-        return output 
-
-    def difference(self, input: Tensor, other: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    def diff(self, input: Tensor, other: Tensor) -> Tensor:
-        return self.difference(input, other)
-
-    def bind(self, input: Tensor, other: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    def multibind(self, input: Tensor) -> Tensor:
-        n = input.size(-2)
-
-        if n == 1:
-            return input.clone()
-
-        hvs = torch.unbind(input, dim=-2)
-
-        output = self.bind(hvs[0], hvs[1])
-        for i in range(2, n):
-            output = self.bind(output, hvs[i])
-
-        return output
-
-    def unbind(self, input: Tensor, other: Tensor) -> Tensor:
-        raise NotImplementedError
-
-    def permute(self, input: Tensor, n: int = 1) -> Tensor:
-        raise NotImplementedError
-
-
-class MAP(ArchModel):
-    @staticmethod
-    def bundle(input: Tensor, other: Tensor) -> Tensor:
-        return input.add(other)
-
-    @staticmethod
-    def multibundle(input: Tensor) -> Tensor:
-        return input.sum(dim=-2)
-
-    @staticmethod
-    def difference(input: Tensor, other: Tensor) -> Tensor:
-        return input.sub(other)
-
-    @staticmethod
-    def bind(input: Tensor, other: Tensor) -> Tensor:
-        return input.mul(other)
-
-    @staticmethod
-    def multibind(input: Tensor) -> Tensor:
-        return input.prod(dim=-2)
-
-    @staticmethod
-    def unbind(input: Tensor, other: Tensor) -> Tensor:
-        return input.mul(other)
-
-    @staticmethod
-    def permute(input: Tensor, n: int = 1) -> Tensor:
-        return input.roll(shifts=n, dim=-1)
 
 
 def biggest_power_two(n):
@@ -89,18 +13,101 @@ def biggest_power_two(n):
     return int("1" + (len(bin(n)) - 3) * "0", 2)
 
 
-class BSC(ArchModel):
-    @staticmethod
-    def bundle(input: Tensor, other: Tensor, *, generator: torch.Generator = None) -> Tensor:
+
+class HyperTensor(Tensor):
+    def bundle(self, other: 'HyperTensor') -> 'HyperTensor':
+        raise NotImplementedError
+
+    def multibundle(self) -> 'HyperTensor':
+        if self.dim() < 2:
+            class_name = self.__class__.__name__
+            raise RuntimeError(f"{class_name} needs to have at least two dimensions for multibundle, got size: {tuple(self.shape)}")
+
+        n = self.size(-2)
+        if n == 1:
+            return self.unsqueeze(-2)
+
+        tensors: List[HyperTensor] = torch.unbind(self, dim=-2)
+        print(type(tensors[0]))
+
+        output = tensors[0].bundle(tensors[1])
+        for i in range(2, n):
+            output = output.bundle(tensors[i])
+
+        return output 
+
+    def difference(self, other: 'HyperTensor') -> 'HyperTensor':
+        raise NotImplementedError
+
+    def diff(self, other: 'HyperTensor') -> 'HyperTensor':
+        return self.difference(other)
+
+    def bind(self, other: 'HyperTensor') -> 'HyperTensor':
+        raise NotImplementedError
+
+    def multibind(self) -> 'HyperTensor':
+        if self.dim() < 2:
+            class_name = self.__class__.__name__
+            raise RuntimeError(f"{class_name} data needs to have at least two dimensions for multibind, got size: {tuple(self.shape)}")
+
+        n = self.size(-2)
+        if n == 1:
+            return self.unsqueeze(-2)
+
+        tensors: List[HyperTensor] = torch.unbind(self, dim=-2)
+
+        output = tensors[0].bind(tensors[1])
+        for i in range(2, n):
+            output = output.bind(tensors[i])
+
+        return output 
+
+    def unbind(self, other: 'HyperTensor') -> 'HyperTensor':
+        raise NotImplementedError
+
+    def permute(self, n: int = 1) -> 'HyperTensor':
+        raise NotImplementedError
+    
+
+class MAPTensor(HyperTensor):
+    def bundle(self, other: 'MAPTensor') -> 'MAPTensor':
+        return self + other
+
+    def multibundle(self) -> 'MAPTensor':
+        return self.sum(dim=-2)
+
+    def difference(self, other: 'MAPTensor') -> 'MAPTensor':
+        return self - other
+
+    def bind(self, other: 'MAPTensor') -> 'MAPTensor':
+        return self * other
+
+    def multibind(self) -> 'MAPTensor':
+        return self.prod(dim=-2)
+
+    def unbind(self, other: 'MAPTensor') -> 'MAPTensor':
+        return self * other
+
+    def permute(self, n: int = 1) -> 'MAPTensor':
+        return self.roll(shifts=n, dim=-1)
+
+
+class BSCTensor(HyperTensor):
+    def bundle(self, other: Tensor, *, generator: torch.Generator = None) -> Tensor:
         tiebreaker = torch.empty_like(input)
         tiebreaker.bernoulli_(0.5, generator=generator)
-        return input.where(input == other, tiebreaker)
 
-    @staticmethod
-    def multibundle(input: Tensor, *, generator:torch.Generator = None) -> Tensor:
-        n = input.size(-2)
+        is_majority = self == other
+        return self.where(is_majority, tiebreaker)
 
-        count = torch.sum(input, dim=-2, dtype=torch.long)
+    def multibundle(self, *, generator:torch.Generator = None) -> Tensor:
+        if self.dim() < 2:
+            class_name = self.__class__.__name__
+            raise RuntimeError(f"{class_name} data needs to have at least two dimensions for multibind, got size: {tuple(self.shape)}")
+
+        n = self.size(-2)
+
+        count = self.sum(dim=-2, dtype=torch.long)
         
         # add a tiebreaker when there are an even number of hvs
         if n % 2 == 0:
@@ -110,21 +117,22 @@ class BSC(ArchModel):
             n += 1
         
         threshold = n // 2
-        return torch.greater(count, threshold)
+        return count > threshold
 
-    @staticmethod
-    def difference(input: Tensor, other: Tensor) -> Tensor:
-        return input.logical_and(~other)
+    def difference(self, other: Tensor) -> Tensor:
+        return self.logical_and(~other)
 
-    @staticmethod
-    def bind(input: Tensor, other: Tensor) -> Tensor:
-        return input.logical_xor(other)
+    def bind(self, other: Tensor) -> Tensor:
+        return self.logical_xor(other)
 
-    @staticmethod
-    def multibind(input: Tensor) -> Tensor:
-        n = input.size(-2)
+    def multibind(self) -> Tensor:
+        if self.dim() < 2:
+            class_name = self.__class__.__name__
+            raise RuntimeError(f"{class_name} data needs to have at least two dimensions for multibind, got size: {tuple(self.shape)}")
+
+        n = self.size(-2)
         n_ = biggest_power_two(n)
-        output = input[..., :n_, :]
+        output = self[..., :n_, :]
 
         # parallelize many XORs in a hierarchical manner
         # for larger batches this is significantly faster
@@ -135,16 +143,21 @@ class BSC(ArchModel):
 
         # TODO: as an optimization we could also perform the hierarchical XOR
         # on the leftovers in a recursive fashion
-        leftovers = torch.unbind(input[..., n_:, :], -2)
+        leftovers = torch.unbind(self[..., n_:, :], -2)
         for i in range(n - n_):
             output = torch.logical_xor(output, leftovers[i])
 
         return output
 
-    @staticmethod
-    def unbind(input: Tensor, other: Tensor) -> Tensor:
-        return input.logical_xor(other)
+    def unbind(self, other: Tensor) -> Tensor:
+        return self.logical_xor(other)
 
-    @staticmethod
-    def permute(input: Tensor, n: int = 1) -> Tensor:
-        return input.roll(shifts=n, dim=-1)
+    def permute(self, n: int = 1) -> Tensor:
+        return self.roll(shifts=n, dim=-1)
+
+
+if __name__ == "__main__":
+    x = HyperTensor(torch.randn(2, 6))
+    print(x)
+    print(torch.add(x, 1))
+    x.multibundle()
