@@ -1,16 +1,15 @@
-import torchhd.architecture as architecture
-import torchhd.primitives as primitives
 import torchhd.functional as functional
 import torchhd.embeddings as embeddings
 import torchhd.structures as structures
 import torchhd.datasets as datasets
 import torchhd.utils as utils
 
-from torchhd.architecture import (
-    HyperTensor,
-    MAPTensor,
-    BSCTensor,
-)
+from torchhd.base import VSA_Model
+from torchhd.bsc import BSC
+from torchhd.map import MAP
+from torchhd.hrr import HRR
+from torchhd.fhrr import FHRR
+
 
 from torchhd.primitives import (
     add,
@@ -22,12 +21,9 @@ from torchhd.primitives import (
     shift,
     bind,
     multibind,
-    set_bind_method,
     bundle,
     multibundle,
-    set_bundle_method,
     permute,
-    set_permute_method,
 )
 from torchhd.functional import (
     identity_hv,
@@ -40,12 +36,18 @@ from torchhd.functional import (
     permute,
     cos_similarity,
     dot_similarity,
-    ham_similarity
+    ham_similarity,
 )
 
 from torchhd.version import __version__
 
 __all__ = [
+    "__version__",
+    "VSA_Model",
+    "BSC",
+    "MAP",
+    "HRR",
+    "FHRR",
     "add",
     "badd",
     "mul",

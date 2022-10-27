@@ -1,10 +1,9 @@
 import math
 import torch
 from torch import BoolTensor, LongTensor, FloatTensor, Tensor
-import torch.nn.functional as F
 from collections import deque
 
-from torchhd.primitives import bind, multibind, release, bundle, multibundle, permute
+from torchhd.base import VSA_Model
 
 
 __all__ = [
@@ -442,7 +441,7 @@ def circular_hv(
 
             temp_hv = torch.where(threshold_v[span_idx] < t, span_start_hv, span_end_hv)
 
-        mutation_history.append(release(temp_hv, mutation_hv))
+        mutation_history.append(bind(temp_hv, mutation_hv.inverse()))
         mutation_hv = temp_hv
 
         if i % 2 == 0:
@@ -450,7 +449,7 @@ def circular_hv(
 
     for i in range(num_embeddings + 1, num_embeddings * 2 - 1):
         mut = mutation_history.popleft()
-        mutation_hv = release(mutation_hv, mut)
+        mutation_hv = bind(mutation_hv, mut.inverse())
 
         if i % 2 == 0:
             hv[i // 2] = mutation_hv
@@ -459,7 +458,7 @@ def circular_hv(
     return hv
 
 
-def bind(input: Tensor, other: Tensor) -> Tensor:
+def bind(input: VSA_Model, other: VSA_Model) -> VSA_Model:
     r"""Binds two hypervectors which produces a hypervector dissimilar to both.
 
     Binding is used to associate information, for instance, to assign values to variables.
@@ -489,65 +488,10 @@ def bind(input: Tensor, other: Tensor) -> Tensor:
         tensor([ 1., -1., -1.])
 
     """
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        return torch.logical_xor(input, other)
-
-    return torch.mul(input, other)
+    return input.bind(other)
 
 
-def unbind(input: Tensor, other: Tensor) -> Tensor:
-    r"""Inverse of the binding operation.
-
-    See :func:`~torchhd.functional.bind`.
-
-    Aliased as ``torchhd.unbind``.
-
-    Args:
-        input (Tensor): input hypervector
-        other (Tensor): other input hypervector
-
-    Shapes:
-        - Input: :math:`(*)`
-        - Other: :math:`(*)`
-        - Output: :math:`(*)`
-
-    Examples::
-
-        >>> x = functional.random_hv(2, 6)
-        >>> x
-        tensor([[-1.,  1.,  1., -1., -1.,  1.],
-                [-1., -1.,  1.,  1.,  1., -1.]])
-        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
-        tensor([-1.,  1.,  1., -1., -1.,  1.])
-
-        >>> x = functional.random_hv(2, 6, dtype=torch.complex64)
-        >>> x
-        tensor([[-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j],
-                [ 0.1429+0.9897j, -0.9173+0.3983j, -0.4906+0.8714j,  0.4710-0.8821j, 0.6478+0.7618j,  0.8753+0.4836j]])
-        >>> functional.unbind(functional.bind(x[0], x[1]), x[1])
-        tensor([-0.6510+0.7591j, -0.9675+0.2528j,  0.7358-0.6772j, -0.1791-0.9838j, -0.9874-0.1585j, -0.3726+0.9280j])
-
-    """
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        return torch.logical_xor(input, other)
-
-    if torch.is_complex(input):
-        return torch.mul(input, other.conj())
-
-    return torch.mul(input, other)
-
-
-def bundle(input: Tensor, other: Tensor, *, tie: BoolTensor = None) -> Tensor:
+def bundle(input: VSA_Model, other: VSA_Model) -> VSA_Model:
     r"""Bundles two hypervectors which produces a hypervector maximally similar to both.
 
     The bundling operation is used to aggregate information into a single hypervector.
@@ -578,21 +522,10 @@ def bundle(input: Tensor, other: Tensor, *, tie: BoolTensor = None) -> Tensor:
         tensor([0., 2., 0.])
 
     """
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        if tie is not None:
-            return torch.where(input == other, input, tie)
-        else:
-            return torch.logical_and(input, other)
-
-    return torch.add(input, other)
+    return input.bundle(other)
 
 
-def permute(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
+def permute(input: VSA_Model, *, n=1) -> VSA_Model:
     r"""Permutes hypervector by specified number of shifts.
 
     The permutation operator is used to assign an order to hypervectors.
@@ -621,12 +554,85 @@ def permute(input: Tensor, *, shifts=1, dims=-1) -> Tensor:
         tensor([ -1.,  1.,  -1.])
 
     """
-    dtype = input.dtype
+    return input.permute(n)
 
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
 
-    return torch.roll(input, shifts=shifts, dims=dims)
+def inverse(input: VSA_Model) -> VSA_Model:
+    return input.inverse()
+
+
+def negative(input: VSA_Model) -> VSA_Model:
+    return input.negative()
+
+
+def randsel(
+    input: Tensor, other: Tensor, *, p: float = 0.5, generator: torch.Generator = None
+) -> Tensor:
+    r"""Bundles two hypervectors by selecting random elements.
+    A bundling operation is used to aggregate information into a single hypervector.
+    The resulting hypervector has elements selected at random from input or other.
+    .. math::
+        \oplus: \mathcal{H} \times \mathcal{H} \to \mathcal{H}
+    Aliased as ``torchhd.randsel``.
+    Args:
+        input (Tensor): input hypervector
+        other (Tensor): other input hypervector
+        p (float, optional): probability of selecting elements from the input hypervector. Default: 0.5.
+        generator (``torch.Generator``, optional): a pseudorandom number generator for sampling.
+    Shapes:
+        - Input: :math:`(*)`
+        - Other: :math:`(*)`
+        - Output: :math:`(*)`
+    Examples::
+        >>> a, b = functional.random_hv(2, 10)
+        >>> a
+        tensor([ 1., -1.,  1., -1.,  1., -1., -1., -1., -1.,  1.])
+        >>> b
+        tensor([ 1., -1.,  1., -1.,  1.,  1., -1.,  1., -1.,  1.])
+        >>> functional.randsel(a, b)
+        tensor([ 1., -1.,  1., -1.,  1.,  1., -1.,  1., -1.,  1.])
+    """
+    select = torch.empty_like(input, dtype=torch.bool)
+    select.bernoulli_(1 - p, generator=generator)
+    return input.where(select, other)
+
+
+def multirandsel(
+    input: Tensor, *, p: FloatTensor = None, generator: torch.Generator = None
+) -> Tensor:
+    r"""Bundling multiple hypervectors by sampling random elements.
+    Bundles all the input hypervectors together.
+    The resulting hypervector has elements selected at random from the input tensor of hypervectors.
+    .. math::
+        \bigoplus_{i=0}^{n-1} V_i
+    Args:
+        input (Tensor): input hypervector tensor
+        p (FloatTensor, optional): probability of selecting elements from the input hypervector. Default: uniform.
+        generator (``torch.Generator``, optional): a pseudorandom number generator for sampling.
+    Shapes:
+        - Input: :math:`(*, n, d)`
+        - Probability (p): :math:`(*, n)`
+        - Output: :math:`(*, d)`
+    Examples::
+        >>> x = functional.random_hv(5, 10)
+        >>> x
+        tensor([[-1.,  1.,  1.,  1., -1.,  1.,  1., -1.,  1., -1.],
+                [-1.,  1.,  1.,  1., -1.,  1., -1., -1., -1., -1.],
+                [-1., -1.,  1., -1., -1.,  1., -1.,  1.,  1., -1.],
+                [ 1.,  1., -1.,  1., -1., -1.,  1., -1.,  1.,  1.],
+                [ 1., -1., -1.,  1.,  1.,  1.,  1., -1., -1., -1.]])
+        >>> functional.multirandsel(x)
+        tensor([ 1., -1., -1.,  1., -1.,  1.,  1.,  1.,  1., -1.])
+    """
+    d = input.size(-1)
+    device = input.device
+
+    if p is None:
+        p = torch.ones(input.shape[:-1], dtype=torch.float, device=device)
+
+    select = torch.multinomial(p, d, replacement=True, generator=generator)
+    select.unsqueeze_(-2)
+    return input.gather(-2, select).squeeze(-2)
 
 
 def soft_quantize(input: Tensor):
@@ -680,7 +686,7 @@ def hard_quantize(input: Tensor):
     return torch.where(input > 0, positive, negative)
 
 
-def dot_similarity(input: Tensor, others: Tensor) -> Tensor:
+def dot_similarity(input: VSA_Model, others: VSA_Model) -> Tensor:
     """Dot product between the input vector and each vector in others.
 
     Aliased as ``torchhd.dot_similarity``.
@@ -723,19 +729,10 @@ def dot_similarity(input: Tensor, others: Tensor) -> Tensor:
                 [ 0.6771, -4.2506,  6.0000]])
 
     """
-    if input.dtype == torch.bool:
-        input_as_bipolar = torch.where(input, -1, 1)
-        others_as_bipolar = torch.where(others, -1, 1)
-
-        return F.linear(input_as_bipolar, others_as_bipolar)
-
-    if torch.is_complex(input):
-        return F.linear(input, others.conj()).real
-
-    return F.linear(input, others)
+    return input.dot_similarity(others)
 
 
-def cos_similarity(input: Tensor, others: Tensor, *, eps=1e-08) -> Tensor:
+def cos_similarity(input: VSA_Model, others: VSA_Model, *, eps=1e-08) -> Tensor:
     """Cosine similarity between the input vector and each vector in others.
 
     Aliased as ``torchhd.cosine_similarity``.
@@ -776,47 +773,10 @@ def cos_similarity(input: Tensor, others: Tensor, *, eps=1e-08) -> Tensor:
                 [0.1806, 0.2607, 1.0000]])
 
     """
-    out_dtype = torch.get_default_dtype()
-
-    # calculate vector magnitude
-    if input.dtype == torch.bool:
-        input_mag = torch.full(
-            input.shape[:-1],
-            math.sqrt(input.size(-1)),
-            dtype=out_dtype,
-            device=input.device,
-        )
-        others_mag = torch.full(
-            others.shape[:-1],
-            math.sqrt(others.size(-1)),
-            dtype=out_dtype,
-            device=others.device,
-        )
-
-    elif torch.is_complex(input):
-        input_dot = torch.real(input * input.conj()).sum(dim=-1, dtype=out_dtype)
-        input_mag = input_dot.sqrt()
-
-        others_dot = torch.real(others * others.conj()).sum(dim=-1, dtype=out_dtype)
-        others_mag = others_dot.sqrt()
-
-    else:
-        input_dot = torch.sum(input * input, dim=-1, dtype=out_dtype)
-        input_mag = input_dot.sqrt()
-
-        others_dot = torch.sum(others * others, dim=-1, dtype=out_dtype)
-        others_mag = others_dot.sqrt()
-
-    if input.dim() > 1:
-        magnitude = input_mag.unsqueeze(-1) * others_mag.unsqueeze(0)
-    else:
-        magnitude = input_mag * others_mag
-
-    magnitude = magnitude.clamp(min=eps)
-    return dot_similarity(input, others).to(out_dtype) / magnitude
+    return input.cos_similarity(others)
 
 
-def ham_similarity(input: Tensor, others: Tensor) -> LongTensor:
+def ham_similarity(input: VSA_Model, others: VSA_Model) -> LongTensor:
     """Number of equal elements between the input vectors and each vector in others.
 
     Args:
@@ -849,7 +809,7 @@ def ham_similarity(input: Tensor, others: Tensor) -> LongTensor:
     return torch.sum(input == others, dim=-1, dtype=torch.long)
 
 
-def multiset(input: Tensor) -> Tensor:
+def multiset(input: VSA_Model) -> VSA_Model:
     r"""Multiset of input hypervectors.
 
     Bundles all the input hypervectors together.
@@ -878,24 +838,13 @@ def multiset(input: Tensor) -> Tensor:
         tensor([-1.,  3.,  1.])
 
     """
-    dim = -2
-    dtype = input.dtype
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        count = torch.sum(input, dim=dim, dtype=torch.long)
-        threshold = input.size(dim) // 2
-        return torch.greater(count, threshold)
-
-    return torch.sum(input, dim=dim, dtype=dtype)
+    return input.multibundle()
 
 
 multibundle = multiset
 
 
-def multibind(input: Tensor) -> Tensor:
+def multibind(input: VSA_Model) -> VSA_Model:
     r"""Binding of multiple hypervectors.
 
     Binds all the input hypervectors together.
@@ -926,25 +875,10 @@ def multibind(input: Tensor) -> Tensor:
         tensor([ 1.,  1., -1.])
 
     """
-    dtype = input.dtype
-    dim = -2
-
-    if dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    if dtype == torch.bool:
-        hvs = torch.unbind(input, dim)
-        result = hvs[0]
-
-        for i in range(1, len(hvs)):
-            result = torch.logical_xor(result, hvs[i])
-
-        return result
-
-    return torch.prod(input, dim=dim, dtype=dtype)
+    return input.multibind()
 
 
-def cross_product(input: Tensor, other: Tensor) -> Tensor:
+def cross_product(input: VSA_Model, other: VSA_Model) -> VSA_Model:
     r"""Cross product between two sets of hypervectors.
 
     First creates a multiset from both tensors ``input`` (:math:`A`) and ``other`` (:math:`B`).
@@ -983,7 +917,7 @@ def cross_product(input: Tensor, other: Tensor) -> Tensor:
     return bind(multiset(input), multiset(other))
 
 
-def ngrams(input: Tensor, n: int = 3) -> Tensor:
+def ngrams(input: VSA_Model, n: int = 3) -> VSA_Model:
     r"""Creates a hypervector with the :math:`n`-gram statistics of the input.
 
     .. math::
@@ -1023,7 +957,7 @@ def ngrams(input: Tensor, n: int = 3) -> Tensor:
     return multiset(n_gram)
 
 
-def hash_table(keys: Tensor, values: Tensor) -> Tensor:
+def hash_table(keys: VSA_Model, values: VSA_Model) -> VSA_Model:
     r"""Hash table from keys-values hypervector pairs.
 
     .. math::
@@ -1056,7 +990,7 @@ def hash_table(keys: Tensor, values: Tensor) -> Tensor:
     return multiset(bind(keys, values))
 
 
-def bundle_sequence(input: Tensor) -> Tensor:
+def bundle_sequence(input: VSA_Model) -> VSA_Model:
     r"""Bundling-based sequence.
 
     The first value is permuted :math:`n-1` times, the last value is not permuted.
@@ -1095,7 +1029,7 @@ def bundle_sequence(input: Tensor) -> Tensor:
     return multiset(permuted)
 
 
-def bind_sequence(input: Tensor) -> Tensor:
+def bind_sequence(input: VSA_Model) -> VSA_Model:
     r"""Binding-based sequence.
 
     The first value is permuted :math:`n-1` times, the last value is not permuted.
@@ -1138,7 +1072,7 @@ def bind_sequence(input: Tensor) -> Tensor:
     return multibind(permuted)
 
 
-def graph(input: Tensor, *, directed=False) -> Tensor:
+def graph(input: VSA_Model, *, directed=False) -> VSA_Model:
     r"""Graph from node hypervector pairs.
 
     If ``directed=False`` this computes:
@@ -1178,6 +1112,42 @@ def graph(input: Tensor, *, directed=False) -> Tensor:
         from_nodes = permute(from_nodes)
 
     return multiset(bind(to_nodes, from_nodes))
+
+
+def cleanup(input: VSA_Model, memory: VSA_Model, threshold=0.0) -> VSA_Model:
+    """Gets the most similar hypervector in memory.
+
+    If the cosine similarity is less than threshold, raises a KeyError.
+
+    Args:
+        input (Tensor): The hypervector to cleanup.
+        memory (Tensor): The hypervectors in memory.
+        threshold (float, optional): minimal similarity between input and any hypervector in memory. Default: ``0.0``.
+
+    Shapes:
+        - Input: :math:`(d)`
+        - Memory: :math:`(n, d)`
+        - Output: :math:`(d)`
+
+    Examples::
+
+        >>> x = functional.random_hv(2, 3)
+        >>> x
+        tensor([[ 1., -1., -1.],
+                [ 1.,  1.,  1.]])
+        >>> functional.cleanup(x[0], x)
+        tensor([[ 1., -1., -1.]])
+
+    """
+    scores = cos_similarity(input, memory)
+    value, index = torch.max(scores, dim=-1)
+
+    if value.item() < threshold:
+        raise RuntimeError(
+            "Hypervector with the highest similarity is less similar than the provided threshold"
+        )
+
+    return torch.index_select(memory, -2, index)
 
 
 def map_range(
@@ -1289,47 +1259,3 @@ def index_to_value(
 
     """
     return map_range(input.float(), 0, index_length - 1, out_min, out_max)
-
-
-def cleanup(input: Tensor, memory: Tensor, threshold=0.0) -> Tensor:
-    """Gets the most similar hypervector in memory.
-
-    If the cosine similarity is less than threshold, raises a KeyError.
-
-    Args:
-        input (Tensor): The hypervector to cleanup.
-        memory (Tensor): The hypervectors in memory.
-        threshold (float, optional): minimal similarity between input and any hypervector in memory. Default: ``0.0``.
-
-    Shapes:
-        - Input: :math:`(d)`
-        - Memory: :math:`(n, d)`
-        - Output: :math:`(d)`
-
-    Examples::
-
-        >>> x = functional.random_hv(2, 3)
-        >>> x
-        tensor([[ 1., -1., -1.],
-                [ 1.,  1.,  1.]])
-        >>> functional.cleanup(x[0], x)
-        tensor([[ 1., -1., -1.]])
-
-    """
-    if input.dtype in {torch.bool, torch.complex64, torch.complex128}:
-        raise NotImplementedError(
-            "Boolean, and Complex hypervectors are not supported yet."
-        )
-
-    if input.dtype == torch.uint8:
-        raise ValueError("Unsigned integer hypervectors are not supported.")
-
-    scores = cosine_similarity(input.float(), memory.float())
-    value, index = torch.max(scores, dim=-1)
-
-    if value.item() < threshold:
-        raise KeyError(
-            "Hypervector with the highest similarity is less similar than the provided threshold"
-        )
-
-    return torch.index_select(memory, -2, index)
